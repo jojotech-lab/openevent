@@ -387,6 +387,19 @@ void TestUuidAllocationAndDeduplication()
     core.reset();
     core = MakeCore(root);
 
+    max_seq = core->MaxSeq();
+    Check(max_seq.ok() && max_seq.value() == 3,
+          "reopened storage must retain the committed message watermark");
+    openevent::ListMessagesRequest reopened_request;
+    reopened_request.set_from_seq(2);
+    reopened_request.set_limit(2);
+    openevent::ListMessagesResponse reopened_messages;
+    status = core->ListMessages(reopened_request, &reopened_messages);
+    Check(status.ok() && reopened_messages.messages_size() == 2 &&
+              reopened_messages.messages(0).payload() == "first" &&
+              reopened_messages.messages(1).payload() == "different-content-is-not-compared",
+          "reopened storage must retain the committed message payloads");
+
     get_seq.set_uuid(allocated.uuids(1));
     status = core->GetSeqByUuid(get_seq, &get_seq_response);
     Check(status.ok() && get_seq_response.seq() == 3,
@@ -1307,26 +1320,6 @@ void TestBatchObjectMetadata()
     Check(core->BatchGetObjectMetadata(request, &response).ok(),
           "batch metadata must not open or validate missing or truncated object data");
     check_ordered_response();
-    {
-        openevent::ObjectStorageServiceImpl service(core);
-        grpc::ServerBuilder builder;
-        int port = 0;
-        builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(), &port);
-        builder.RegisterService(&service);
-        auto server = builder.BuildAndStart();
-        Check(server != nullptr && port > 0, "start batch metadata gRPC server");
-        auto channel = grpc::CreateChannel("127.0.0.1:" + std::to_string(port),
-                                           grpc::InsecureChannelCredentials());
-        auto stub = openevent::ObjectStorageService::NewStub(channel);
-        grpc::ClientContext context;
-        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
-        response.Clear();
-        Check(stub->BatchGetObjectMetadata(&context, request, &response).ok(),
-              "BatchGetObjectMetadata must be available through the generated gRPC service");
-        check_ordered_response();
-        server->Shutdown();
-        server->Wait();
-    }
     core.reset();
     std::filesystem::remove_all(root);
 }
@@ -2292,44 +2285,6 @@ void TestObjectIoErrorClassificationAndPaths()
     auto missing = openevent::ObjectFileStore::Open((root / "missing").string());
     Check(!missing.ok() && missing.status().code() == grpc::StatusCode::UNAVAILABLE,
           "missing object directory should report UNAVAILABLE");
-
-    std::filesystem::remove_all(root);
-}
-
-void TestUnifiedStorageReopen()
-{
-    const auto root = std::filesystem::temp_directory_path() / "openevent_core_unified_reopen";
-    std::filesystem::remove_all(root);
-    uint64_t published_seq = 0;
-    {
-        auto core = MakeCore(root);
-        std::string token = AddToken(*core, 100);
-        uint64_t channel_id = CreateChannel(*core, 100, token, openevent::VISIBILITY_PUBLIC);
-        openevent::PublishAutoSeqRequest publish;
-        publish.set_principal(100);
-        publish.set_token(token);
-        publish.set_channel_id(channel_id);
-        publish.set_payload("persisted");
-        publish.set_uuid(AllocateUuid(*core));
-        openevent::PublishAutoSeqResponse response;
-        openevent::Status status = core->PublishAutoSeq(publish, &response);
-        Check(status.ok(), status.message());
-        published_seq = response.seq();
-    }
-
-    auto reopened = MakeCore(root);
-    auto max_seq = reopened->MaxSeq();
-    Check(max_seq.ok() && max_seq.value() == published_seq,
-          "reopened unified storage should retain the committed watermark");
-
-    openevent::ListMessagesRequest request;
-    request.set_from_seq(published_seq);
-    request.set_limit(1);
-    openevent::ListMessagesResponse response;
-    openevent::Status status = reopened->ListMessages(request, &response);
-    Check(status.ok(), status.message());
-    Check(response.messages_size() == 1 && response.messages(0).payload() == "persisted",
-          "reopened unified storage should retain the committed message");
 
     std::filesystem::remove_all(root);
 }
@@ -3420,7 +3375,6 @@ int main()
     TestPreparingRecoveryAndNoDirectoryScan();
     TestCommittedObjectCorruptionIsFatal();
     TestObjectIoErrorClassificationAndPaths();
-    TestUnifiedStorageReopen();
     TestUnifiedStorageLayout();
     TestNestedStoragePathInitialization();
     TestUint64KeyEncodingOrder();

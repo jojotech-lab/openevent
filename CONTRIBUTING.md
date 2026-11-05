@@ -10,6 +10,7 @@ Install dependencies and initialize submodules as described in the
 ```bash
 make test
 make test-runtime
+OPENEVENT_SERVER_BIN="$PWD/build/openevent_server" make -C openevent-sdk e2e
 make check-docs
 ```
 
@@ -18,6 +19,8 @@ to build and install a fresh SDK wheel from local sources before running in that
 test environment. See the [SDK README](openevent-sdk/README.md#build-and-test)
 for test environment and dependency rules. Select the Python used to create the
 test environment with `PYTHON`. Server test data and logs stay under `build/`.
+The SDK's `make e2e` uses the server built above to verify RPC integration and
+end-to-end behavior, including batch object metadata queries.
 
 ## Contribution Guidelines
 

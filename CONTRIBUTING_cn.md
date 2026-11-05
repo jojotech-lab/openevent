@@ -9,12 +9,14 @@
 ```bash
 make test
 make test-runtime
+OPENEVENT_SERVER_BIN="$PWD/build/openevent_server" make -C openevent-sdk e2e
 make check-docs
 ```
 
 `make test-runtime` 先构建当前服务端，并通过 SDK 的 `make test-env` 从本地源码构建、安装本次 SDK wheel，
 再使用该测试环境运行；SDK 测试环境和依赖规则见 [SDK README](openevent-sdk/README_cn.md#构建和测试)。
 使用 `PYTHON` 选择创建测试环境的 Python。服务端测试数据与日志保存在 `build/`。
+SDK 的 `make e2e` 使用上面构建的服务端验证 RPC 接入和端到端行为，包括批量对象 metadata 查询。
 
 ## 贡献准则
 
